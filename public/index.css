@@ -1,3 +1,11 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f9;
+    color: #333;
+    text-align: center;
+    padding-top: 50px;
+}
+
 .shutdownbutton {
     background-color: #ff4d4d;
     color: white;
