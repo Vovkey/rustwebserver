@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{BufReader, prelude::*};
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -89,19 +90,26 @@ impl Worker {
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-
     let pool = ThreadPool::new(4);
+
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
+        let flag_clone = Arc::clone(&shutdown_flag);
 
-        pool.execute(|| {
-            handle_connection(stream);
+        pool.execute(move || {
+            handle_connection(stream, &flag_clone);
         });
+
+        if shutdown_flag.load(Ordering::SeqCst) {
+            println!("Shutdown-Signal recieved. Shutting down Server...");
+            break;
+        }
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
     let buf_reader = BufReader::new(&stream);
     let request_line = buf_reader.lines().next().unwrap().unwrap();
 
@@ -110,6 +118,10 @@ fn handle_connection(mut stream: TcpStream) {
         "GET /sleep HTTP/1.1" => {
             thread::sleep(Duration::from_secs(5));
             ("HTTP/1.1 200 OK", "index.html")
+        }
+        "GET /quit HTTP/1.1" => {
+            shutdown_flag.store(true, Ordering::SeqCst);
+            ("HTTP/1.1 200 OK", "quit.html")
         }
         _ => ("HTTP/1.1 404 NOT FOUND", "404.html"),
     };
