@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::io::{BufReader, prelude::*};
 use std::net::TcpListener;
 use std::net::TcpStream;
@@ -112,20 +114,23 @@ fn main() {
 
 fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
     let buf_reader = BufReader::new(&stream);
-    let request_line = match buf_reader.lines().next() {
-        Some(Ok(line)) => line,
-        _ => return,
+
+    let request = match HttpRequest::parse(buf_reader) {
+        Ok(req) => req,
+        Err(_) => return,
     };
 
-    let parts: Vec<&str> = request_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        return;
-    }
-    let method = parts[0];
-    let uri = parts[1];
+    let user_agent = request
+        .headers
+        .get("user-agent")
+        .map_or("Unknown", |v| v.as_str());
+    println!(
+        "Incoming: {} {} (User-Agent: {})",
+        request.method, request.uri, user_agent
+    );
 
-    if method == "GET" {
-        if uri == "/sleep" {
+    if request.method == "GET" {
+        if request.uri == "/sleep" {
             thread::sleep(Duration::from_secs(5));
             let file_path = Path::new("public/index.html");
             let contents = fs::read(file_path).unwrap_or_default();
@@ -136,7 +141,7 @@ fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
                 &contents,
             );
             return;
-        } else if uri == "/quit" {
+        } else if request.uri == "/quit" {
             shutdown_flag.store(true, Ordering::SeqCst);
             let file_path = Path::new("public/quit.html");
             let contents = fs::read(file_path).unwrap_or_default();
@@ -148,9 +153,22 @@ fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
             );
             return;
         }
+    } else if request.method == "POST" && request.uri == "/submit" {
+        if let Some(body) = &request.body {
+            println!("Recieved POST-Body: {}", body);
+        }
+
+        let response_body = "<h1>Message Recieved!</h1><a href='/'>Back</a>";
+        send_response(
+            &mut stream,
+            "HTTP/1.1 200 OK",
+            "text/html; charset=UTF-8",
+            response_body.as_bytes(),
+        );
+        return;
     }
 
-    let file_path = get_file_path(uri);
+    let file_path = get_file_path(&request.uri);
     let content_type = get_content_type(&file_path);
 
     let status_line = if file_path.ends_with("404.html") {
@@ -204,5 +222,65 @@ fn get_content_type(path: &Path) -> &str {
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         _ => "text/plain; charset=UTF-8",
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpRequest {
+    pub method: String,
+    pub uri: String,
+    pub headers: HashMap<String, String>,
+    pub body: Option<String>,
+}
+
+impl HttpRequest {
+    pub fn parse<R: Read>(mut reader: BufReader<R>) -> Result<Self, String> {
+        let mut request_line = String::new();
+        if reader
+            .read_line(&mut request_line)
+            .map_err(|e| e.to_string())?
+            == 0
+        {
+            return Err("Empty Request".to_string());
+        }
+
+        let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Invalid Request-Line".to_string());
+        }
+
+        let method = parts[0].to_string();
+        let uri = parts[1].to_string();
+
+        let mut headers = HashMap::new();
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
+                break;
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some((key, value)) = trimmed.split_once(':') {
+                headers.insert(key.trim().to_lowercase(), value.trim().to_string());
+            }
+        }
+
+        let mut body = None;
+        if let Some(len_str) = headers.get("content-length") {
+            if let Ok(len) = len_str.parse::<usize>() {
+                let mut buf = vec![0; len];
+                reader.read_exact(&mut buf).map_err(|e| e.to_string())?;
+                body = String::from_utf8(buf).ok();
+            }
+        }
+
+        Ok(HttpRequest {
+            method,
+            uri,
+            headers,
+            body,
+        })
     }
 }
