@@ -5,6 +5,7 @@ use std::io::{BufReader, prelude::*};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -97,12 +98,15 @@ fn main() {
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
 
+    let metrics = Arc::new(ServerMetrics::new());
+
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         let flag_clone = Arc::clone(&shutdown_flag);
+        let metrics_clone = Arc::clone(&metrics);
 
         pool.execute(move || {
-            handle_connection(stream, &flag_clone);
+            handle_connection(stream, &flag_clone, &metrics_clone);
         });
 
         if shutdown_flag.load(Ordering::SeqCst) {
@@ -112,13 +116,28 @@ fn main() {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
-    let buf_reader = BufReader::new(&stream);
+fn handle_connection(
+    mut stream: TcpStream,
+    shutdown_flag: &Arc<AtomicBool>,
+    metrics: &Arc<ServerMetrics>,
+) {
+    let req_count = metrics.total_requests.fetch_add(1, Ordering::SeqCst) + 1;
+    metrics.active_connections.fetch_add(1, Ordering::SeqCst);
+    let _guard = ActiveConnectionGuard {
+        counter: &metrics.active_connections,
+    };
 
+    let buf_reader = BufReader::new(&stream);
     let request = match HttpRequest::parse(buf_reader) {
         Ok(req) => req,
         Err(_) => return,
     };
+
+    let active = metrics.active_connections.load(Ordering::SeqCst);
+    println!(
+        "[Req#{} | Activce: {}] {} {}",
+        req_count, active, request.method, request.uri
+    );
 
     let user_agent = request
         .headers
@@ -152,6 +171,35 @@ fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
                 &contents,
             );
             return;
+        } else if request.uri == "/stats" {
+            let file_path = Path::new("public/stats.html");
+            let html_template = fs::read_to_string(file_path)
+                .unwrap_or_else(|_| "<h1>stats.html not found!</h1>".to_string());
+
+            let html_body = html_template
+                .replace(
+                    "{{total}}",
+                    &metrics.total_requests.load(Ordering::SeqCst).to_string(),
+                )
+                .replace(
+                    "{{active}}",
+                    &metrics
+                        .active_connections
+                        .load(Ordering::SeqCst)
+                        .to_string(),
+                )
+                .replace(
+                    "{{not_found}}",
+                    &metrics.not_found_errors.load(Ordering::SeqCst).to_string(),
+                );
+
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "text/html; charset=UTF-8",
+                html_body.as_bytes(),
+            );
+            return;
         }
     } else if request.method == "POST" && request.uri == "/submit" {
         if let Some(body) = &request.body {
@@ -172,13 +220,13 @@ fn handle_connection(mut stream: TcpStream, shutdown_flag: &Arc<AtomicBool>) {
     let content_type = get_content_type(&file_path);
 
     let status_line = if file_path.ends_with("404.html") {
+        metrics.not_found_errors.fetch_add(1, Ordering::SeqCst);
         "HTTP/1.1 404 NOT FOUND"
     } else {
         "HTTP/1.1 200 Ok"
     };
 
     let contents = fs::read(&file_path).unwrap_or_else(|_| b"<h1>404 Not Found</h1>".to_vec());
-
     send_response(&mut stream, status_line, content_type, &contents);
 }
 
@@ -282,5 +330,31 @@ impl HttpRequest {
             headers,
             body,
         })
+    }
+}
+
+pub struct ServerMetrics {
+    pub total_requests: AtomicUsize,
+    pub active_connections: AtomicUsize,
+    pub not_found_errors: AtomicUsize,
+}
+
+impl ServerMetrics {
+    pub fn new() -> Self {
+        Self {
+            total_requests: AtomicUsize::new(0),
+            active_connections: AtomicUsize::new(0),
+            not_found_errors: AtomicUsize::new(0),
+        }
+    }
+}
+
+struct ActiveConnectionGuard<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl<'a> Drop for ActiveConnectionGuard<'a> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::SeqCst);
     }
 }
