@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
@@ -121,6 +122,7 @@ fn handle_connection(
     shutdown_flag: &Arc<AtomicBool>,
     metrics: &Arc<ServerMetrics>,
 ) {
+    let start_time = Instant::now();
     let req_count = metrics.total_requests.fetch_add(1, Ordering::SeqCst) + 1;
     metrics.active_connections.fetch_add(1, Ordering::SeqCst);
     let _guard = ActiveConnectionGuard {
@@ -200,6 +202,23 @@ fn handle_connection(
                 html_body.as_bytes(),
             );
             return;
+        } else if request.uri == "/api/metrics" {
+            let total = metrics.total_requests.load(Ordering::SeqCst);
+            let active = metrics.active_connections.load(Ordering::SeqCst);
+            let not_found = metrics.not_found_errors.load(Ordering::SeqCst);
+
+            let json_body = format!(
+                r#"{{"total_requests": {}, "active_connections": {}, "not_found_errors": {}}}"#,
+                total, active, not_found
+            );
+
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "application/json; charset=UTF-8",
+                json_body.as_bytes(),
+            );
+            return;
         }
     } else if request.method == "POST" && request.uri == "/submit" {
         if let Some(body) = &request.body {
@@ -228,6 +247,14 @@ fn handle_connection(
 
     let contents = fs::read(&file_path).unwrap_or_else(|_| b"<h1>404 Not Found</h1>".to_vec());
     send_response(&mut stream, status_line, content_type, &contents);
+    let duration = start_time.elapsed();
+    println!(
+        "[Req #{} | {}ms] {} {}",
+        req_count,
+        duration.as_millis(),
+        request.method,
+        request.uri
+    );
 }
 
 fn send_response(stream: &mut TcpStream, status_line: &str, content_type: &str, contents: &[u8]) {
@@ -269,6 +296,7 @@ fn get_content_type(path: &Path) -> &str {
         Some("js") => "application/javascript; charset=UTF-8",
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("ico") => "image/x-icon",
         _ => "text/plain; charset=UTF-8",
     }
 }
