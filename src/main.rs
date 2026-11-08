@@ -158,10 +158,11 @@ fn handle_connection(
             let total = metrics.total_requests.load(Ordering::SeqCst);
             let active = metrics.active_connections.load(Ordering::SeqCst);
             let not_found = metrics.not_found_errors.load(Ordering::SeqCst);
+            let uptime_seconds = metrics.start_time.elapsed().as_secs();
 
             let json_body = format!(
-                r#"{{"total_requests": {}, "active_connections": {}, "not_found_errors": {}}}"#,
-                total, active, not_found
+                r#"{{"total_requests": {}, "active_connections": {}, "not_found_errors": {}, "uptime_seconds": {}}}"#,
+                total, active, not_found, uptime_seconds
             );
 
             send_response(

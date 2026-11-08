@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug)]
 pub struct HttpRequest {
