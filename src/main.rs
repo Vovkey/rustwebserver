@@ -1,9 +1,12 @@
+mod cache;
 mod http;
 mod metrics;
 mod thread_pool;
 
+use cache::FileCache;
 use http::{HttpRequest, get_content_type, get_file_path, send_response};
 use metrics::{ActiveConnectionGuard, ServerMetrics};
+use serde::Deserialize;
 use thread_pool::ThreadPool;
 
 use std::env;
@@ -18,33 +21,45 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-struct ServerConfig {
-    address: String,
-    worker_threads: usize,
-    public_dir: String,
+#[derive(Deserialize, Debug)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub worker_threads: usize,
+    pub public_dir: String,
+}
+
+impl ServerConfig {
+    pub fn load(path: &str) -> Self {
+        let contents = fs::read_to_string(path).unwrap_or_else(|_| {
+            println!("Config file 'server.toml not found, using default valuues.");
+            String::new()
+        });
+
+        toml::from_str(&contents).unwrap_or(ServerConfig {
+            host: "127.0.0.1".to_string(),
+            port: 7878,
+            worker_threads: 4,
+            public_dir: "public".to_string(),
+        })
+    }
 }
 
 fn main() {
     env_logger::init();
+
+    let config = ServerConfig::load("Server.toml");
+    let address = format!("{}:{}", config.host, config.port);
+
     let args: Vec<String> = env::args().collect();
-    let address = args
-        .get(1)
-        .cloned()
-        .unwrap_or_else(|| "127.0.0.1:7878".to_string());
     let worker_threads = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
 
-    let config = ServerConfig {
-        address,
-        worker_threads,
-        public_dir: "public".to_string(),
-    };
-
-    let listener = match TcpListener::bind(&config.address) {
+    let listener = match TcpListener::bind(&address) {
         Ok(l) => l,
         Err(e) => {
             eprintln!(
                 "Error: Couldn't bind server to addess '{}' : {}",
-                config.address, e
+                address, e
             );
             eprintln!("Hint: Check if the port is already in use and if IP-address is correct.");
             process::exit(1);
