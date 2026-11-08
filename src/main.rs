@@ -11,6 +11,7 @@ use std::fs;
 use std::io::BufReader;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
+use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -37,7 +38,18 @@ fn main() {
         public_dir: "public".to_string(),
     };
 
-    let listener = TcpListener::bind(&config.address).unwrap();
+    let listener = match TcpListener::bind(&config.address) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!(
+                "Error: Couldn't bind server to addess '{}' : {}",
+                config.address, e
+            );
+            eprintln!("Hint: Check if the port is already in use and if IP-address is correct.");
+            process::exit(1);
+        }
+    };
+
     let pool = ThreadPool::new(config.worker_threads);
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
