@@ -78,6 +78,11 @@ fn handle_connection(
     shutdown_flag: &Arc<AtomicBool>,
     metrics: &Arc<ServerMetrics>,
 ) {
+    if let Err(e) = stream.set_read_timeout(Some(Duration::from_secs(5))) {
+        log::warn!("Failed to set read timeout: {}", e);
+        return;
+    }
+
     let start_time = Instant::now();
     let req_count = metrics.total_requests.fetch_add(1, Ordering::SeqCst) + 1;
     metrics.active_connections.fetch_add(1, Ordering::SeqCst);
