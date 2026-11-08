@@ -1,6 +1,5 @@
-use std::collection::HashMap;
-use std::fs;
-use std::io::{BufReader, Read, Write};
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
@@ -102,7 +101,7 @@ pub fn get_file_path(request_uri: &str) -> PathBuf {
 }
 
 pub fn get_content_type(path: &Path) -> &str {
-    match path.extension().abd_then(|e| e.to_str()) {
+    match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html; charset=UTF-8",
         Some("css") => "text/css; charset=UTF-8",
         Some("js") => "application/javascript; charset=UTF-8",

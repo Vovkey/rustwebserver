@@ -23,16 +23,14 @@ fn main() {
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let metrics = Arc::new(ServerMetrics::new());
 
-    println!("Started Server on http://127.0.0.1:7878").unwrap();
+    println!("Started Server on http://127.0.0.1:7878");
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         let flag_clone = Arc::clone(&shutdown_flag);
         let metrics_clone = Arc::clone(&metrics);
 
-        pool.execute(move || {
-            handle_connection(stream, &flag_clone, &metrics_clone)
-        });
+        pool.execute(move || handle_connection(stream, &flag_clone, &metrics_clone));
 
         if shutdown_flag.load(Ordering::SeqCst) {
             println!("Shutdown-signal received. Shutting down Server...");
@@ -48,9 +46,9 @@ fn handle_connection(
 ) {
     let start_time = Instant::now();
     let req_count = metrics.total_requests.fetch_add(1, Ordering::SeqCst) + 1;
-    metrics.acttive_connnections.fetch_add(1, Ordering::SeqCst);
+    metrics.active_connections.fetch_add(1, Ordering::SeqCst);
     let _guard = ActiveConnectionGuard {
-        counter: &metrics.active_connections
+        counter: &metrics.active_connections,
     };
 
     let buf_reader = BufReader::new(&stream);
@@ -59,24 +57,34 @@ fn handle_connection(
         Err(_) => return,
     };
 
-    let active = metrics.active_connections.load(Ordering::SeqCst;
+    let active = metrics.active_connections.load(Ordering::SeqCst);
     println!(
         "[Req#{} | Active: {}] {} {}",
         req_count, active, request.method, request.uri
     );
 
-    if request.method == "GET"  {
+    if request.method == "GET" {
         if request.uri == "/sleep" {
             thread::sleep(Duration::from_secs(5));
             let file_path = Path::new("public/index.html");
             let contents = fs::read(file_path).unwrap_or_default();
-            send_response(&mut stream, "HTTP/1.1 200 OK", "text/html; charset=UTF-8", &contents);
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "text/html; charset=UTF-8",
+                &contents,
+            );
             return;
         } else if request.uri == "/quit" {
             shutdown_flag.store(true, Ordering::SeqCst);
             let file_path = Path::new("public/quit.html");
             let contents = fs::read(file_path).unwrap_or_default();
-            send_response(&mut stream, "HTTP/1.1 200 OK", "text.html; charset=UTF-8", &contents);
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "text.html; charset=UTF-8",
+                &contents,
+            );
             return;
         } else if request.uri == "/stats" {
             let file_path = Path::new("public/stats.html");
@@ -84,11 +92,28 @@ fn handle_connection(
                 .unwrap_or_else(|_| "<h1>stats.html not found!</h1>".to_string());
 
             let html_body = html_template
-                .replace("{{total}}", &metrics.total_requests.load(Ordering::SeqCst).to_string())
-                .replace("{{active}}", &metrics.active_connections.load(Ordering::SeqCst).to_string())
-                .replace("{{not_found}}", &metrics.not_found_errors.load(Ordering::SeqCst)).to_string());
+                .replace(
+                    "{{total}}",
+                    &metrics.total_requests.load(Ordering::SeqCst).to_string(),
+                )
+                .replace(
+                    "{{active}}",
+                    &metrics
+                        .active_connections
+                        .load(Ordering::SeqCst)
+                        .to_string(),
+                )
+                .replace(
+                    "{{not_found}}",
+                    &metrics.not_found_errors.load(Ordering::SeqCst).to_string(),
+                );
 
-            send_response(&mut stream, "HTTP/1.1 200 OK", "text/html; charset=UTF-8", html_body.as_bytes());
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "text/html; charset=UTF-8",
+                html_body.as_bytes(),
+            );
             return;
         } else if request.uri == "/api/metrics" {
             let total = metrics.total_requests.load(Ordering::SeqCst);
@@ -100,8 +125,48 @@ fn handle_connection(
                 total, active, not_found
             );
 
-            send_response(&mut stream, "HTTP/1.1 200 OK", "application/json; charset=UTF-8", json_body.as_bytes());
+            send_response(
+                &mut stream,
+                "HTTP/1.1 200 OK",
+                "application/json; charset=UTF-8",
+                json_body.as_bytes(),
+            );
             return;
         }
-    } else if request.method == "POST"
+    } else if request.method == "POST" && request.uri == "/submit" {
+        if let Some(body) = &request.body {
+            println!("Received POST-Body: {}", body);
+        }
+
+        let response_body = "<h1>Message Received!</h1><a href='/'>Return</a>";
+        send_response(
+            &mut stream,
+            "HTTP/1.1 200 OK",
+            "text/html; charset=UTF-8",
+            response_body.as_bytes(),
+        );
+        return;
+    }
+
+    let file_path = get_file_path(&request.uri);
+    let content_type = get_content_type(&file_path);
+
+    let status_line = if file_path.ends_with("404.html") {
+        metrics.not_found_errors.fetch_add(1, Ordering::SeqCst);
+        "HTTP/1.1 404 NOT FOUND"
+    } else {
+        "HTTP/1.1 200 OK"
+    };
+
+    let contents = fs::read(&file_path).unwrap_or_else(|_| b"<h1>404 Not Found</h1>".to_vec());
+    send_response(&mut stream, status_line, content_type, &contents);
+
+    let duration = start_time.elapsed();
+    println!(
+        "[Req #{} | {}ms] {} {}",
+        req_count,
+        duration.as_millis(),
+        request.method,
+        request.uri
+    );
 }
