@@ -6,6 +6,7 @@ use http::{HttpRequest, get_content_type, get_file_path, send_response};
 use metrics::{ActiveConnectionGuard, ServerMetrics};
 use thread_pool::ThreadPool;
 
+use std::env;
 use std::fs;
 use std::io::BufReader;
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -16,14 +17,34 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+struct ServerConfig {
+    address: String,
+    worker_threads: usize,
+    public_dir: String,
+}
+
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    let pool = ThreadPool::new(4);
+    let args: Vec<String> = env::args().collect();
+    let address = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| "127.0.0.1:7878".to_string());
+    let worker_threads = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(4);
+
+    let config = ServerConfig {
+        address,
+        worker_threads,
+        public_dir: "public".to_string(),
+    };
+
+    let listener = TcpListener::bind(&config.address).unwrap();
+    let pool = ThreadPool::new(config.worker_threads);
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let metrics = Arc::new(ServerMetrics::new());
 
-    println!("Started Server on http://127.0.0.1:7878");
+    println!("Started Server on http://{}", config.address);
+    println!("Worker Threads: {}", config.worker_threads);
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
