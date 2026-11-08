@@ -9,7 +9,7 @@ use thread_pool::ThreadPool;
 use std::env;
 use std::fs;
 use std::io::BufReader;
-use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process;
 use std::sync::Arc;
@@ -25,6 +25,7 @@ struct ServerConfig {
 }
 
 fn main() {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
     let address = args
         .get(1)
@@ -51,12 +52,12 @@ fn main() {
     };
 
     let pool = ThreadPool::new(config.worker_threads);
-
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let metrics = Arc::new(ServerMetrics::new());
 
-    println!("Started Server on http://{}", config.address);
-    println!("Worker Threads: {}", config.worker_threads);
+    log::info!("Started Server on http://{}", config.address);
+    log::info!("Worker Threads: {}", config.worker_threads);
+    log::info!("Public Directory ./{}", config.public_dir);
 
     for stream in listener.incoming() {
         let stream = stream.unwrap();

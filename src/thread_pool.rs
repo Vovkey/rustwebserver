@@ -1,3 +1,4 @@
+use log::{info, warn};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
@@ -62,11 +63,11 @@ impl Worker {
 
                 match job {
                     Ok(job) => {
-                        println!("Worker {id} got a job; executing.");
+                        info!("Worker {} got a job; executing.", id);
                         job();
                     }
                     Err(_) => {
-                        println!("Worker {id} disconnected; shutting down.");
+                        warn!("Worker {} disconnected; shutting down.", id);
                         break;
                     }
                 }

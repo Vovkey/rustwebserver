@@ -2,5 +2,8 @@
 name = "rustwebserver"
 version = "0.1.0"
 edition = "2024"
+default-run = "rustwebserver"
 
 [dependencies]
+log = "0.4"
+env_logger = "0.11"
