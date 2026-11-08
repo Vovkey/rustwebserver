@@ -1,4 +1,4 @@
-RWS
+**RWS**
 
 This is my very own rust web server built from scratch.
 
