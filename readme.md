@@ -2,6 +2,7 @@
 
 This is my very own rust web server built from scratch.
 
+Rust is obviously a dependency.
 It basically let's you host a static website, so html, css and JS.
 
 For testing purposes, it has the /sleep route, which has a 5s delay. The /stats route for a statistics overview. The /api/metrics route, which outputs a JSON of the statistics. The /quit rout to shutdown the server. And a test-messaging form.
