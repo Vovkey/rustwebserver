@@ -10,11 +10,12 @@ To test it out, download it and run it with ./rustwebserver 127.0.0.1:YOUR_PORT 
 
 There is also a load test to test out the strength of the server. Run it in a second terminal window with ./load_test 127.0.0.1:ACTIVE_PORT NUMBER_OF_REQUESTS
 
-rustwebserver
-├── rustwebserver
-├── server.toml
-└── public/
-    ├── index.html
-    └── 404.html
+rustwebserver\
+├── rustwebserver\
+├── load_test\
+├── server.toml\
+└── public/  
+----------├── index.html\
+----------└── 404.html
 
 If you have any questions, DM me on slack (dgmautner)
